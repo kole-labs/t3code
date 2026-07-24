@@ -29,6 +29,9 @@ jobs:
           cache: true
           run-install: true
 
+      - name: Prepare the desktop runtime
+        run: vp run --filter @t3tools/desktop ensure:electron
+
       - name: Check formatting
         run: vp fmt --check
 
@@ -40,3 +43,9 @@ jobs:
 
       - name: Run tests
         run: vp run -r test
+
+      - name: Build the desktop app
+        run: vp run build:desktop
+
+      - name: Check release packaging
+        run: node scripts/release-smoke.ts
