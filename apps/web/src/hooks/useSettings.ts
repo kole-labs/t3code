@@ -246,12 +246,13 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
     "server settings update",
   );
   const updateSettings = useCallback(
-    (patch: Partial<UnifiedSettings>) => {
+    async (patch: Partial<UnifiedSettings>) => {
       const { serverPatch, clientPatch } = splitPatch(patch);
+      let serverResult: Awaited<ReturnType<typeof persistServerSettings>> | null = null;
 
       if (Object.keys(serverPatch).length > 0) {
         if (environmentId) {
-          void persistServerSettings({
+          serverResult = await persistServerSettings({
             environmentId,
             input: { patch: serverPatch },
           });
@@ -264,6 +265,8 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
           ...clientPatch,
         });
       }
+
+      return serverResult;
     },
     [environmentId, persistServerSettings],
   );
