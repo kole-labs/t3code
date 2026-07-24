@@ -1,0 +1,51 @@
+name: Kosmos - Quality gate
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kosmos-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify Kosmos T3
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Kosmos T3
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Prepare the desktop runtime
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Check formatting
+        run: vp fmt --check
+
+      - name: Check code quality
+        run: vp lint --report-unused-disable-directives
+
+      - name: Check types
+        run: vp run -r --concurrency-limit 2 typecheck
+
+      - name: Run tests
+        run: vp run -r test
+
+      - name: Build the desktop app
+        run: vp run build:desktop
+
+      - name: Check release packaging
+        run: node scripts/release-smoke.ts

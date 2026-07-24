@@ -1,0 +1,55 @@
+name: Kosmos - Check for T3 updates
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: kosmos-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Test upstream and open an update pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Kosmos T3
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "kosmos-update-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Rebase Kosmos changes onto official T3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git remote add upstream https://github.com/pingdotgg/t3code.git
+          git fetch upstream main --tags
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Kosmos T3 already contains the newest official T3 source."
+            exit 0
+          fi
+
+          git rebase upstream/main
+          branch="automation/kosmos-upstream-sync"
+          git push --force-with-lease origin "HEAD:${branch}"
+
+          existing_pr="$(gh pr list --head "$branch" --base main --state open --json url --jq '.[0].url')"
+          if [[ -z "$existing_pr" ]]; then
+            gh pr create \
+              --head "$branch" \
+              --base main \
+              --title "chore: update Kosmos T3 from official T3" \
+              --body "Automated weekly update. All Kosmos changes were replayed onto the newest official T3 source. Merge only after the checks below pass."
+          fi

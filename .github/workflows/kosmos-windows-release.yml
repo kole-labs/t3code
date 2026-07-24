@@ -1,0 +1,142 @@
+name: Kosmos - Build approved Windows update
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kosmos-windows-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify approved source
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Kosmos T3
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Prepare the desktop runtime
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Check formatting
+        run: vp fmt --check
+
+      - name: Check code quality
+        run: vp lint --report-unused-disable-directives
+
+      - name: Check types
+        run: vp run -r --concurrency-limit 2 typecheck
+
+      - name: Run tests
+        run: vp run -r test
+
+      - name: Build the desktop app
+        run: vp run build:desktop
+
+      - name: Check release packaging
+        run: node scripts/release-smoke.ts
+
+  wsl:
+    name: Build the WSL terminal support
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Kosmos T3
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Build Linux terminal support
+        shell: bash
+        run: |
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          (cd "$pty_dir" && npx --yes node-gyp rebuild)
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - name: Save Linux terminal support
+        uses: actions/upload-artifact@v7
+        with:
+          name: kosmos-wsl-node-pty-x64
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+
+  release:
+    name: Build and publish the approved Windows update
+    needs: [verify, wsl]
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Kosmos T3
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Load WSL terminal support
+        uses: actions/download-artifact@v7
+        with:
+          name: kosmos-wsl-node-pty-x64
+          path: wsl-prebuild
+
+      - name: Resolve Kosmos release version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_RUN_NUMBER -gt 65535) {
+            throw "GitHub run number exceeds the Windows version limit."
+          }
+          $package = Get-Content apps/server/package.json -Raw | ConvertFrom-Json
+          $base = [System.Version]::Parse($package.version)
+          $version = "$($base.Major).$($base.Minor + 1).$env:GITHUB_RUN_NUMBER"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=kosmos-v$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build protected Windows installer
+        env:
+          T3CODE_DESKTOP_VERSION: ${{ steps.version.outputs.version }}
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: kole-labs/t3code
+          T3CODE_DESKTOP_WSL_PREBUILD: ${{ github.workspace }}/wsl-prebuild/pty.node
+        run: vp run dist:desktop:win:x64
+
+      - name: Publish approved Kosmos update
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Kosmos T3 ${{ steps.version.outputs.version }}
+          body: |
+            Tested Kosmos T3 Windows update.
+
+            Base commit: ${{ github.sha }}
+            Update source: kole-labs/t3code only.
+          make_latest: true
+          prerelease: false
+          files: |
+            release/T3-Code-*.exe
+            release/T3-Code-*.exe.blockmap
+            release/latest.yml
