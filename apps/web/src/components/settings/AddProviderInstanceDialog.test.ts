@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveWizardNavigation } from "./AddProviderInstanceDialog.logic";
+import {
+  isConfirmedProviderSave,
+  resolveWizardNavigation,
+} from "./AddProviderInstanceDialog.logic";
+
+describe("isConfirmedProviderSave", () => {
+  it("accepts only a completed server save", () => {
+    expect(isConfirmedProviderSave({ _tag: "Success" })).toBe(true);
+    expect(isConfirmedProviderSave({ _tag: "Failure" })).toBe(false);
+    expect(isConfirmedProviderSave(null)).toBe(false);
+  });
+});
 
 describe("resolveWizardNavigation", () => {
   const invalidId = { instanceIdError: "Instance ID is required." };

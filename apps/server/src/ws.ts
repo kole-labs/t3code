@@ -1074,6 +1074,9 @@ const makeWsRpcLayer = (
         );
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
+        const availableEditors = yield* externalLauncher
+          .resolveAvailableEditors()
+          .pipe(Effect.timeoutOption("2 seconds"), Effect.map(Option.getOrElse(() => [])));
 
         return {
           environment,
@@ -1083,7 +1086,7 @@ const makeWsRpcLayer = (
           keybindings: keybindingsConfig.keybindings,
           issues: keybindingsConfig.issues,
           providers,
-          availableEditors: yield* externalLauncher.resolveAvailableEditors(),
+          availableEditors,
           observability: {
             logsDirectoryPath: config.logsDir,
             localTracingEnabled: true,

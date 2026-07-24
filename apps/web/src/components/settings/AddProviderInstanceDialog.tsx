@@ -8,6 +8,7 @@ import {
   ProviderDriverKind,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -31,6 +32,7 @@ import { ProviderSettingsForm, deriveProviderSettingsFields } from "./ProviderSe
 import { AnimatedHeight } from "../AnimatedHeight";
 import {
   ADD_PROVIDER_WIZARD_STEPS,
+  isConfirmedProviderSave,
   resolveWizardNavigation,
   type WizardNavigation,
 } from "./AddProviderInstanceDialog.logic";
@@ -131,6 +133,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
   // Driver-specific config drafts keyed by driver so toggling between drivers
   // during the same dialog session does not lose in-progress input.
   const [configByDriver, setConfigByDriver] = useState<Record<string, Record<string, unknown>>>({});
+  const [isSaving, setIsSaving] = useState(false);
   // Errors are suppressed until the user has tried to submit once. After that
   // they update live so fixing the problem clears the message in place.
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
@@ -179,7 +182,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
     );
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setHasAttemptedSubmit(true);
     if (instanceIdError !== null) return;
 
@@ -203,8 +206,18 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
       ...settings.providerInstances,
       [brandedId]: nextInstance,
     };
+    setIsSaving(true);
     try {
-      updateSettings({ providerInstances: nextMap });
+      const result = await updateSettings({ providerInstances: nextMap });
+      if (result === null) {
+        throw new Error("T3 is not connected to the primary environment.");
+      }
+      if (!isConfirmedProviderSave(result)) {
+        if (result._tag === "Failure") {
+          throw squashAtomCommandFailure(result);
+        }
+        throw new Error("T3 did not confirm the provider instance was saved.");
+      }
       toastManager.add({
         type: "success",
         title: "Provider instance added",
@@ -217,6 +230,8 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
         title: "Could not add provider instance",
         description: error instanceof Error ? error.message : "Update failed.",
       });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -425,8 +440,8 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
                 Next
               </Button>
             ) : (
-              <Button size="sm" onClick={handleSave}>
-                Add instance
+              <Button size="sm" onClick={handleSave} disabled={isSaving}>
+                {isSaving ? "Adding..." : "Add instance"}
               </Button>
             )}
           </DialogFooter>
